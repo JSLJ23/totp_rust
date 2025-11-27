@@ -1,0 +1,10 @@
+[package]
+name = "totp_rust"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+data-encoding = "2.9.0"
+hmac = "0.12.1"
+sha1 = "0.10.6"
+urlencoding = "2.1.3"

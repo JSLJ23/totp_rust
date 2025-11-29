@@ -1,12 +1,45 @@
 use std::error::Error;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use aes::Aes256;
+use base64::{Engine, engine::general_purpose};
+use cipher::generic_array::GenericArray;
+use cipher::{BlockDecryptMut, BlockEncryptMut, KeyInit, block_padding::Pkcs7};
 use data_encoding::BASE32_NOPAD;
+use ecb::{Decryptor, Encryptor};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 use urlencoding::encode;
 
+type Aes256EcbEnc = Encryptor<Aes256>;
+type Aes256EcbDec = Decryptor<Aes256>;
 type HmacSha1 = Hmac<Sha1>;
+
+const MASTER_KEY: [u8; 32] = [
+    0x1d, 0x6d, 0x23, 0x43, 0x65, 0x51, 0x56, 0x37, 0x50, 0x04, 0x55, 0x4c, 0x56, 0x14, 0x6e, 0x43,
+    0x7b, 0x5c, 0x59, 0x6f, 0x57, 0x02, 0x04, 0x6d, 0x5c, 0x26, 0x00, 0x75, 0x58, 0x43, 0x56, 0x79,
+];
+
+// Encrypt
+pub fn encrypt_secret(key_bytes: &[u8; 32], plaintext: &str) -> String {
+    let key = GenericArray::clone_from_slice(key_bytes);
+    let encryptor = Aes256EcbEnc::new(&key);
+    let ciphertext = encryptor.encrypt_padded_vec_mut::<Pkcs7>(plaintext.as_bytes());
+    general_purpose::STANDARD.encode(&ciphertext)
+}
+
+// Decrypt
+pub fn decrypt_secret(key_bytes: &[u8; 32], blob_b64: &str) -> Result<String, Box<dyn Error>> {
+    let ciphertext = general_purpose::STANDARD.decode(blob_b64)?;
+    let key = GenericArray::clone_from_slice(key_bytes);
+    let decryptor = Aes256EcbDec::new(&key);
+    let decrypted = decryptor
+        .decrypt_padded_vec_mut::<Pkcs7>(&ciphertext)
+        .map_err(|e| -> Box<dyn Error> {
+            Box::<dyn Error>::from(format!("Unpadding failed: {:?}", e))
+        })?;
+    Ok(String::from_utf8(decrypted)?)
+}
 
 /// Google Auth–compatible TOTP helper.
 /// - 6 digits
@@ -102,7 +135,7 @@ impl TOTP {
         let counter_bytes = step.to_be_bytes();
 
         // HMAC-SHA1(secret, counter)
-        let mut mac = HmacSha1::new_from_slice(&self.secret)?;
+        let mut mac = <HmacSha1 as Mac>::new_from_slice(&self.secret)?;
         mac.update(&counter_bytes);
         let hash = mac.finalize().into_bytes();
 
@@ -126,7 +159,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example Base32 secret (DO NOT hardcode in real apps)
     let secret = "JBSWY3DPEHPK3PXP";
 
-    let totp = TOTP::new(secret, "MyService", "josh@example.com")?;
+    let secret_encrypted = encrypt_secret(&MASTER_KEY, secret);
+    println!(
+        "Encrypted Base32 secret (base64 blob): {}",
+        &secret_encrypted
+    );
+
+    // Later, decrypt just before use
+    let secret_decrypted = decrypt_secret(&MASTER_KEY, &secret_encrypted)?;
+    println!("Decrypted Base32 secret: {}", &secret_decrypted);
+
+    let totp = TOTP::new(&secret_decrypted, "MyService", "josh@example.com")?;
 
     // 1. Generate current code
     let code = totp.generate_current()?;

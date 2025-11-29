@@ -8,3 +8,8 @@ data-encoding = "2.9.0"
 hmac = "0.12.1"
 sha1 = "0.10.6"
 urlencoding = "2.1.3"
+base64 = "0.22.1"
+aes = "0.8.4"
+block-padding = "0.4.2"
+ecb = { version = "0.1", features = ["alloc"] }
+cipher = { version = "0.4", features = ["block-padding", "alloc"] }
